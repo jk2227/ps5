@@ -1,7 +1,10 @@
 open Async.Std
 
+let x = ref []
+
 let init addrs =
-  failwith "Where you headed, cowboy?"
+  x := List.fold_left (fun acc e -> let (s,i) = e in 
+    (Tcp.to_host_and_port s i) :: acc)  [] addrs 
 
 exception InfrastructureFailure
 exception MapFailure of string
