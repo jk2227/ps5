@@ -31,10 +31,9 @@ module AQUEUE : Queue = struct
 end 
 
 let q = AQUEUE.create () 
-
 let init addrs =
   List.fold_left (fun acc e -> let (s,i) = e in 
-    AQUEUE.push q ((Tcp.to_host_and_port s i), i) )  () addrs 
+    AQUEUE.push q (Tcp.to_host_and_port s i))  () addrs 
 
 exception InfrastructureFailure
 exception MapFailure of string
@@ -46,18 +45,39 @@ module Make (Job : MapReduce.Job) = struct
      find the data structures and functions you implemented in the warmup
      useful. Or, you can pass [~how:`Parallel] as an argument to the
      [Deferred.List] functions.*)
-  let map_reduce inputs = failwith "lol look at comments below"
-
-    (*calling init on each connection and telling it what job it's doing*)
-   (*  List.fold_left (fun acc e -> let (connection, port) = AQUEUE.pop q in 
-      Tcp.connect connection >>= fun v1 -> let (s,r,w) = v1 in 
-      Worker.init port >>= fun _ -> Pipe.write w Job.name
-
-    ) 
-    (return []) inputs  *)
-    (*end*)
+  module WRequest = Protocol.WorkerRequest(Job)
+  module WResponse = Protocol.WorkerResponse(Job)
+  module C = Combiner.Make(Job)
 
 
+  let map_reduce inputs = 
+
+    let map input = 
+      let connection = AQUEUE.pop q in (*pop returns deferred value so i have to fix*)
+      Tcp.connect connection >>= fun v -> let (s,r,w) = v in 
+      Writer.write_line w Job.name; 
+      WRequest.send w (WRequest.MapRequest input);
+      WResponse.receive r >>= fun response -> match response with
+      | `Eof -> failwith "TODO" (*when worker fails*) 
+      | `Ok (WResponse.JobFailed x) -> failwith "TODO" (**) 
+      | `Ok (WResponse.MapResult lst) -> AQUEUE.push q connection; lst
+      | `Ok (WResponse.ReduceResult o) -> failwith "wtf wrong type"
+    in  
+    
+    let reduce k vl =
+      let connection = AQUEUE.pop q in (*pop returns deferred value so i have to fix*)
+      Tcp.connect connection >>= fun v -> let (s,r,w) = v in 
+      WRequest.send w (WRequest.ReduceRequest (k, vl));
+      WResponse.receive r >>= fun response -> match response with
+      | `Eof -> failwith "TODO" (*when worker fails*)
+      | `Ok (WResponse.JobFailed x) -> failwith "TODO" (**)
+      | `Ok (WResponse.MapResult lst) -> failwith "wtf wrong type"
+      | `Ok (WResponse.ReduceResult o) -> (k, o)
+    in
+
+    Deferred.List.map ~how: `Parallel inputs ~f: map 
+    >>| List.flatten
+    >>| C.combine
+    >>= Deferred.List.map ~how `Parallel ~f: reduce
     
 end
-
