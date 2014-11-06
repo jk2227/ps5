@@ -47,37 +47,47 @@ module Make (Job : MapReduce.Job) = struct
      [Deferred.List] functions.*)
   module WRequest = Protocol.WorkerRequest(Job)
   module WResponse = Protocol.WorkerResponse(Job)
-  module C = Combiner.Make(Job)
-
+  module C = Combiner.Make(Job) 
 
   let map_reduce inputs = 
-
+  
     let map input = 
-      let connection = AQUEUE.pop q in (*pop returns deferred value so i have to fix*)
-      Tcp.connect connection >>= fun v -> let (s,r,w) = v in 
-      Writer.write_line w Job.name; 
-      WRequest.send w (WRequest.MapRequest input);
-      WResponse.receive r >>= fun response -> match response with
+      let response = ref `Eof in
+      let werq = ref (Tcp.to_host_and_port "temp" 0) in
+      ignore( 
+        AQUEUE.pop q >>= fun c -> werq := c; 
+        Tcp.connect c >>= fun v -> let (s,r,w) = v in 
+        Writer.write_line w Job.name ;         
+        WRequest.send w (WRequest.MapRequest input);
+        WResponse.receive r >>= fun res -> response := res; return ()
+      ); 
+      begin match !response with
       | `Eof -> failwith "TODO" (*when worker fails*) 
-      | `Ok (WResponse.JobFailed x) -> failwith "TODO" (**) 
-      | `Ok (WResponse.MapResult lst) -> AQUEUE.push q connection; lst
+      | `Ok (WResponse.JobFailed x) -> failwith "TODO"  
+      | `Ok (WResponse.MapResult lst) -> AQUEUE.push q !werq; lst 
+      (*i had to make lst a deferred value to satisfy compiler before but it's ok now?*)
       | `Ok (WResponse.ReduceResult o) -> failwith "wtf wrong type"
-    in  
-    
+    end in  
+
     let reduce k vl =
-      let connection = AQUEUE.pop q in (*pop returns deferred value so i have to fix*)
-      Tcp.connect connection >>= fun v -> let (s,r,w) = v in 
-      WRequest.send w (WRequest.ReduceRequest (k, vl));
-      WResponse.receive r >>= fun response -> match response with
+      let response = ref `Eof in
+      let werq = ref (Tcp.to_host_and_port "temp" 0) in
+      ignore(
+        AQUEUE.pop q >>= fun c -> werq := c;
+        Tcp.connect c >>= fun v -> let (s,r,w) = v in 
+        WRequest.send w (WRequest.ReduceRequest (k, vl));
+        WResponse.receive r >>= fun res -> response := res; return () 
+      );
+      begin match !response with
       | `Eof -> failwith "TODO" (*when worker fails*)
       | `Ok (WResponse.JobFailed x) -> failwith "TODO" (**)
       | `Ok (WResponse.MapResult lst) -> failwith "wtf wrong type"
-      | `Ok (WResponse.ReduceResult o) -> (k, o)
-    in
+      | `Ok (WResponse.ReduceResult o) -> AQUEUE.push q !werq; (k, o)
+    end in
 
     Deferred.List.map ~how: `Parallel inputs ~f: map 
     >>| List.flatten
     >>| C.combine
-    >>= Deferred.List.map ~how `Parallel ~f: reduce
+    >>= Deferred.List.map ~how: `Parallel ~f: reduce 
     
 end
