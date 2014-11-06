@@ -52,24 +52,24 @@ module Make (Job : MapReduce.Job) = struct
 
     
   
-    let map input = 
+    let rec map input = 
         AQUEUE.pop q >>= fun c -> let (s,r,w) = c in 
         WRequest.send w (WRequest.MapRequest input);
         WResponse.receive r >>= fun res ->  
       begin match res with
-      | `Eof -> failwith "TODO" (*when worker fails*) 
-      | `Ok (WResponse.JobFailed x) -> failwith "TODO"  
+      | `Eof -> map input (*when worker fails*) 
+      | `Ok (WResponse.JobFailed x) -> failwith "This job sucks"  
       | `Ok (WResponse.MapResult lst) -> AQUEUE.push q c; return lst 
       | `Ok (WResponse.ReduceResult o) -> failwith "wtf wrong type"
     end in  
 
-    let reduce (k ,vl) =
+    let rec reduce (k ,vl) =
         AQUEUE.pop q >>= fun c -> let (s,r,w) = c in 
         WRequest.send w (WRequest.ReduceRequest (k, vl));
         WResponse.receive r >>= fun res -> 
       begin match res with
-      | `Eof -> failwith "TODO" (*when worker fails*)
-      | `Ok (WResponse.JobFailed x) -> failwith "TODO" (**)
+      | `Eof -> reduce (k, vl) (*when worker fails*)
+      | `Ok (WResponse.JobFailed x) -> failwith "This job sucks"
       | `Ok (WResponse.MapResult lst) -> failwith "wtf wrong type"
       | `Ok (WResponse.ReduceResult o) -> AQUEUE.push q c; return (k, o)
     end in
