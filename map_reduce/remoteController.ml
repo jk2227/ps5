@@ -31,9 +31,8 @@ module AQUEUE : Queue = struct
 end 
 
 let q = AQUEUE.create () 
-let init addrs =
-  List.fold_left (fun acc e -> let (s,i) = e in 
-    AQUEUE.push q (Tcp.to_host_and_port s i))  () addrs 
+let initLst = ref [] 
+let init addrs = initLst := addrs; ()
 
 exception InfrastructureFailure
 exception MapFailure of string
@@ -50,41 +49,41 @@ module Make (Job : MapReduce.Job) = struct
   module C = Combiner.Make(Job) 
 
   let map_reduce inputs = 
+
+    
   
-    let map input = 
-      let response = ref `Eof in
-      let werq = ref (Tcp.to_host_and_port "temp" 0) in
-      ignore( 
-        AQUEUE.pop q >>= fun c -> werq := c; 
-        Tcp.connect c >>= fun v -> let (s,r,w) = v in 
-        Writer.write_line w Job.name ;         
+    let rec map input = 
+        AQUEUE.pop q >>= fun c -> let (s,r,w) = c in 
         WRequest.send w (WRequest.MapRequest input);
-        WResponse.receive r >>= fun res -> response := res; return ()
-      ); 
-      begin match !response with
-      | `Eof -> failwith "TODO" (*when worker fails*) 
-      | `Ok (WResponse.JobFailed x) -> failwith "TODO"  
-      | `Ok (WResponse.MapResult lst) -> AQUEUE.push q !werq; lst 
-      (*i had to make lst a deferred value to satisfy compiler before but it's ok now?*)
+        WResponse.receive r >>= fun res ->  
+      begin match res with
+      | `Eof -> map input (*when worker fails*) 
+      | `Ok (WResponse.JobFailed x) -> failwith "This job sucks"  
+      | `Ok (WResponse.MapResult lst) -> AQUEUE.push q c; return lst 
       | `Ok (WResponse.ReduceResult o) -> failwith "wtf wrong type"
     end in  
 
-    let reduce k vl =
-      let response = ref `Eof in
-      let werq = ref (Tcp.to_host_and_port "temp" 0) in
-      ignore(
-        AQUEUE.pop q >>= fun c -> werq := c;
-        Tcp.connect c >>= fun v -> let (s,r,w) = v in 
+    let rec reduce (k ,vl) =
+        AQUEUE.pop q >>= fun c -> let (s,r,w) = c in 
         WRequest.send w (WRequest.ReduceRequest (k, vl));
-        WResponse.receive r >>= fun res -> response := res; return () 
-      );
-      begin match !response with
-      | `Eof -> failwith "TODO" (*when worker fails*)
-      | `Ok (WResponse.JobFailed x) -> failwith "TODO" (**)
+        WResponse.receive r >>= fun res -> 
+      begin match res with
+      | `Eof -> reduce (k, vl) (*when worker fails*)
+      | `Ok (WResponse.JobFailed x) -> failwith "This job sucks"
       | `Ok (WResponse.MapResult lst) -> failwith "wtf wrong type"
-      | `Ok (WResponse.ReduceResult o) -> AQUEUE.push q !werq; (k, o)
+      | `Ok (WResponse.ReduceResult o) -> AQUEUE.push q c; return (k, o)
     end in
 
+    let start ()= 
+      let lst = !initLst in 
+      List.fold_left(fun acc e -> 
+        let (s,i) = e in
+        ignore( Tcp.connect (Tcp.to_host_and_port s i) >>= fun v -> 
+          let (s,r,w) = v in 
+          Writer.write_line w Job.name; 
+          AQUEUE.push q v; (return ()) )) () (lst) 
+    in 
+    start (); 
     Deferred.List.map ~how: `Parallel inputs ~f: map 
     >>| List.flatten
     >>| C.combine
