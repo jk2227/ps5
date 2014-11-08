@@ -5,17 +5,34 @@ type relation = R | S
 
 module Job = struct
   type input  = relation * string * string
-  type key    = unit (* TODO: choose an appropriate type *)
-  type inter  = unit (* TODO: choose an appropriate type *)
+  type key    = string (* TODO: choose an appropriate type *)
+  type inter  = relation * string (* TODO: choose an appropriate type *)
   type output = (string * string) list
 
   let name = "composition.job"
 
   let map (r, x, y) =
-    failwith "TODO"
+    return (match r with
+    | R -> [(y, (r, x))]
+    | S -> [(x, (r, y))])
 
   let reduce (k, vs) =
-    failwith "TODO"
+    let splitter lst = 
+      List.fold_left (fun (a1, a2) (typ, dat) -> 
+        match typ with
+        | R -> (dat::a1, a2)
+        | S -> (a1, dat::a2)
+      )
+      ([], []) lst
+    in
+    let crossProd (l1, l2) = 
+      List.fold_left (fun a x ->
+        List.fold_left (fun b y ->
+          (x, y)::b
+        ) a l2
+      ) [] l1
+    in
+    return (crossProd (splitter vs))
 end
 
 let () = MapReduce.register_job (module Job)
