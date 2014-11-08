@@ -2,17 +2,28 @@ open Async.Std
 
 module Job = struct
   type input  = string * string list
-  type key    = unit (* TODO: choose an appropriate type *)
-  type inter  = unit (* TODO: choose an appropriate type *)
+  type key    = string * string 
+  type inter  = string 
   type output = string list
 
   let name = "friends.job"
 
   let map (name, friendlist) =
-    failwith "TODO"
+    return (List.fold_left (fun a x -> 
+      let key  = (min name x, max name x) in
+      (List.fold_left (fun b y -> (key, y)::b) a friendlist)
+    ) [] friendlist)
 
   let reduce (_, friendlists) =
-    failwith "TODO"
+    let compr s1 s2 = if (s1 < s2) then -1 else
+                      if (s1 = s2) then 0 else 1
+    in
+    let rec getAdjacentDoubles lst = match lst with
+      | [] | [_] -> []
+      | a::b::c -> if (a = b) then a::(getAdjacentDoubles (b::c))
+                              else getAdjacentDoubles (b::c)
+    in
+    return (getAdjacentDoubles (List.sort compr friendlists))
 end
 
 let () = MapReduce.register_job (module Job)
@@ -55,7 +66,7 @@ module App = struct
         >>= MR.map_reduce
         (* replace this failwith with print once you've figured out the key and
            inter types*)
-        >>| fun _ -> failwith "TODO"
+        >>| print
   end
 end
 
