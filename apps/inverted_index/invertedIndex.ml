@@ -8,18 +8,29 @@ type filename = string
 (******************************************************************************)
 
 module Job = struct
-  type input
-  type key
-  type inter
-  type output
+  type input  = string * string list
+  type key    = string
+  type inter  = string
+  type output = string list
 
   let name = "index.job"
 
   let map input : (key * inter) list Deferred.t =
-    failwith "I'm stepping through the door / And I'm floating in a most peculiar way / And the stars look very different today"
+    let (file, wordlist) = input in
+    return (List.fold_left (fun a e -> (e, file)::a) [] wordlist)
 
   let reduce (key, inters) : output Deferred.t =
-    failwith "Here am I floating round my tin can / Far above the Moon / Planet Earth is blue / And there's nothing I can do."
+    let compr s1 s2 = if (s1 < s2) then -1 else
+                      if (s1 = s2) then 0 else 1
+    in
+    let remove_dups_sorted lst = 
+      List.fold_left (fun a e -> 
+        match a with
+        | h::t -> if e = h then a else e::a
+        | [] -> e::a
+      ) [] lst
+    in
+    return (  remove_dups_sorted (List.sort compr inters))
 end
 
 (* register the job *)
@@ -61,7 +72,13 @@ module App  = struct
     (** The input should be a single file name.  The named file should contain
         a list of files to index. *)
     let main args =
-      failwith "Can you hear me, Major Zardoz? Can you hear me, Major Zardoz? Can you hear me, Major Zardoz?"
+      match args with
+      | [s] -> begin
+        read s >>= (fun name_data_pair -> Deferred.List.map name_data_pair (fun (x, y) -> return (x, AppUtils.split_words y)) )
+        >>= MR.map_reduce
+        >>= (fun x -> return (output x))
+      end
+      | _ -> failwith "Incorrect number of input files. Please pass one master 'file of file paths' file"
   end
 end
 
