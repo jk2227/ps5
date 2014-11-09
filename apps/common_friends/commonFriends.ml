@@ -18,12 +18,12 @@ module Job = struct
     let compr s1 s2 = if (s1 < s2) then -1 else
                       if (s1 = s2) then 0 else 1
     in
-    let rec getAdjacentDoubles lst = match lst with
+    let rec get_adjacent_doubles lst = match lst with
       | [] | [_] -> []
-      | a::b::c -> if (a = b) then a::(getAdjacentDoubles (b::c))
-                              else getAdjacentDoubles (b::c)
+      | a::b::c -> if (a = b) then a::(get_adjacent_doubles (b::c))
+                              else get_adjacent_doubles (b::c)
     in
-    return (getAdjacentDoubles (List.sort compr friendlists))
+    return (get_adjacent_doubles (List.sort compr friendlists))
 end
 
 let () = MapReduce.register_job (module Job)

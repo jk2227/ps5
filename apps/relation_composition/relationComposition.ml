@@ -25,14 +25,14 @@ module Job = struct
       )
       ([], []) lst
     in
-    let crossProd (l1, l2) = 
+    let cross_prod (l1, l2) = 
       List.fold_left (fun a x ->
         List.fold_left (fun b y ->
           (x, y)::b
         ) a l2
       ) [] l1
     in
-    return (crossProd (splitter vs))
+    return (cross_prod (splitter vs))
 end
 
 let () = MapReduce.register_job (module Job)
