@@ -24,7 +24,7 @@ module Make (Job : MapReduce.Job) = struct
     = Deferred.any [ after (Core.Time.Span.of_sec n) >>| (fun () -> None);
     thunk () >>| (fun x -> Some x) ]
 
-let workersLeft = ref (List.length !initlst)
+let workersLeft = ref (List.length !initLst)
 
   let map_reduce inputs = 
     let rec map input = 
@@ -70,12 +70,9 @@ let workersLeft = ref (List.length !initlst)
     >>| C.combine
     >>= Deferred.List.map ~how: `Parallel ~f: reduce
     >>= fun x -> while !workersLeft <> 0 do
-                   begin
-                   	let (s,r,w) = AQueue.pop q in 
-                   	Socket.shutdown s `Both
-                   end;
+                   	ignore (AQueue.pop q >>= fun (s,r,w) -> 
+                    workersLeft := !workersLeft - 1; 
+                   	return (Socket.shutdown s `Both)) 
+                 done;
                  (*close everything*) return x
-
-    in 
-    ignore (initLst := List.map (fun e -> let e = (s, r, w) in Socket.shutdown s `Both) !initLst);
 end
