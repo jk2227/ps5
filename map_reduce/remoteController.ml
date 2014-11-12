@@ -19,11 +19,6 @@ module Make (Job : MapReduce.Job) = struct
   module WResponse = Protocol.WorkerResponse(Job)
   module C = Combiner.Make(Job) 
 
-(* creds to nate foster's slides *)
-  let timeout (thunk:unit -> 'a Deferred.t) (n:float) : ('a option) Deferred.t 
-    = Deferred.any [ after (Core.Time.Span.of_sec n) >>| (fun () -> None);
-    thunk () >>| (fun x -> Some x) ]
-
 let workersLeft = ref (List.length !initLst)
 
   let map_reduce inputs = 
@@ -55,6 +50,15 @@ let workersLeft = ref (List.length !initLst)
       | `Ok (WResponse.ReduceResult o) -> AQueue.push q c; return (k, o)
     end in
 
+    let rec terminate () = 
+      if !workersLeft = 0 then ()
+      else begin
+      ignore (AQueue.pop q >>= fun (s,r,w) -> workersLeft := !workersLeft -1; 
+        return (Socket.shutdown s `Both); 
+      ); terminate ()
+    end
+  in
+
     let start ()= 
       let lst = !initLst in 
       List.fold_left(fun acc e -> 
@@ -63,16 +67,15 @@ let workersLeft = ref (List.length !initLst)
           let (s,r,w) = v in 
           Writer.write_line w Job.name; 
           AQueue.push q v; (return ()) )) () (lst) 
-    in 
+    
+    
+  in
+
     start (); 
     Deferred.List.map ~how: `Parallel inputs ~f: map 
     >>| List.flatten
     >>| C.combine
     >>= Deferred.List.map ~how: `Parallel ~f: reduce
-    >>= fun x -> while !workersLeft <> 0 do
-                   	ignore (AQueue.pop q >>= fun (s,r,w) -> 
-                    workersLeft := !workersLeft - 1; 
-                   	return (Socket.shutdown s `Both)) 
-                 done;
+    >>= fun x -> terminate (); 
                  (*close everything*) return x
 end
