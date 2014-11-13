@@ -3,20 +3,27 @@ open AppUtils
 
 type relation = R | S
 
+(******************************************************************************)
+(** {RelationComposition Job}                                                 *)
+(******************************************************************************)
+
 module Job = struct
   type input  = relation * string * string
-  type key    = string (* TODO: choose an appropriate type *)
-  type inter  = relation * string (* TODO: choose an appropriate type *)
+  type key    = string 
+  type inter  = relation * string 
   type output = (string * string) list
 
   let name = "composition.job"
 
+  (** Keys the relation on the element in the middle set
+      Intermediate value on other element designated as from set 1 or 3 *)
   let map (r, x, y) =
     return (match r with
     | R -> [(y, (r, x))]
     | S -> [(x, (r, y))])
 
   let reduce (k, vs) =
+  (** Splits the list to a list of elements from set 1 and one from set 3 *)
     let splitter lst = 
       List.fold_left (fun (a1, a2) (typ, dat) -> 
         match typ with
@@ -25,6 +32,7 @@ module Job = struct
       )
       ([], []) lst
     in
+    (** Generates list of pairs of elements from a list 1 by elements from a list 2 *)
     let cross_prod (l1, l2) = 
       List.fold_left (fun a x ->
         List.fold_left (fun b y ->
@@ -46,6 +54,10 @@ let read_file (r: relation) (file: string) : (relation * string * string) list D
       Reader.file_lines file            >>= fun lines  ->
       return (List.map read_line lines) >>= fun result ->
       return (List.map (fun (domain, range) -> (r, domain, range)) result)
+
+(******************************************************************************)
+(** {RelationComposition App}                                                 *)
+(******************************************************************************)
 
 module App = struct
   let name = "composition"

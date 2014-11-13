@@ -15,14 +15,19 @@ module Job = struct
 
   let name = "index.job"
 
+  (** Associates all the words, which are keys, in the given file
+      with the filename *)
   let map input : (key * inter) list Deferred.t =
     let (file, wordlist) = input in
     return (List.fold_left (fun a e -> (e, file)::a) [] wordlist)
 
   let reduce (key, inters) : output Deferred.t =
+  (** Compare function, used for List.sort later *)
     let compr s1 s2 = if (s1 < s2) then -1 else
                       if (s1 = s2) then 0 else 1
     in
+    (** Assuming a sorted list, removes duplicates by checking for adjacent 
+        elements that are identical *)
     let remove_dups_sorted lst = 
       List.fold_left (fun a e -> 
         match a with
@@ -30,7 +35,7 @@ module Job = struct
         | [] -> e::a
       ) [] lst
     in
-    return (  remove_dups_sorted (List.sort compr inters))
+    return (remove_dups_sorted (List.sort compr inters))
 end
 
 (* register the job *)

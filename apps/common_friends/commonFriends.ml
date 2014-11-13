@@ -9,15 +9,24 @@ module Job = struct
   let name = "friends.job"
 
   let map (name, friendlist) =
+  (** For each friendship from this node, associates all the 
+      nodes distance 1 away from this node to the friendship.
+      Common friends to both of the nodes of this friendship
+      will show up twice in the friendlist of the reduce step *)
     return (List.fold_left (fun a x -> 
       let key  = (min name x, max name x) in
       (List.fold_left (fun b y -> (key, y)::b) a friendlist)
     ) [] friendlist)
 
   let reduce (_, friendlists) =
+  (** Compare function, used for List.sort later *)
     let compr s1 s2 = if (s1 < s2) then -1 else
                       if (s1 = s2) then 0 else 1
     in
+  (** Given a sorted list, outputs nodes that occur twice
+      adjacently in the list.  Will output a node (n-1) times
+      for n repeated occurences, but n should only take on
+      a value of 2 in this case. *)
     let rec get_adjacent_doubles lst = match lst with
       | [] | [_] -> []
       | a::b::c -> if (a = b) then a::(get_adjacent_doubles (b::c))
