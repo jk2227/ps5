@@ -20,10 +20,9 @@ let push q x = ignore (match q with
 (* Wait until an element becomes available, and then return it. *)
 (*requires: a Reader,Writer pair to pop an element from*)
 (*returns: reads a value from the Reader, essentially popping the element,
-and returns that element as a Deferred value
-If q is empty then an error is raised*)
+and returns that element as a Deferred value*)
 let pop  q = 
     let (r,w) = q in Pipe.read r >>= fun v -> 
       match v with 
-      | `Eof -> failwith "empty queue"
+      | `Eof -> failwith "bleh"
       | `Ok x -> return x  
