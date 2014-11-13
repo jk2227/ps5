@@ -1,9 +1,15 @@
 open Async.Std
 open AQueue
 
+(*Queue that stores workers*)
 let q = AQueue.create () 
-let initLst = ref [] 
-let init addrs = initLst := addrs; ()
+(*initial list of host,port pairs that we will attempt to connect to
+during the map_reduce phase*)
+let initLst = ref []
+(*number of functional workers*)
+let workersLeft = ref 0
+(*prepares connection*) 
+let init addrs = initLst := addrs; workersLeft := (List.length addrs); ()
 
 exception InfrastructureFailure
 exception MapFailure of string
@@ -19,63 +25,85 @@ module Make (Job : MapReduce.Job) = struct
   module WResponse = Protocol.WorkerResponse(Job)
   module C = Combiner.Make(Job) 
 
-let workersLeft = ref (List.length !initLst)
-
   let map_reduce inputs = 
+    (*Helper function. In the case that a worker dies or misbehaves, we 
+      close the connection, decrement the number of workers that are 
+      functional and pass on the current job to another worker. If the number 
+      of functional workers hits zero, an InfrastructureFailure exception 
+      is raised*)
+    let next_worker map_or_reduce arg worker =
+      workersLeft := !workersLeft - 1; 
+      if !workersLeft == 0 then 
+        raise InfrastructureFailure
+      else
+        let (s,r,w) = worker in
+        return (Socket.shutdown s `Both) >>= fun () -> map_or_reduce arg in
+
+    (*Performs map part of map_reduce. Issues one map job to a worker and waits
+      for the result. Also handles the cases where the connection to the worker
+      is dead or the worker returns an inappropriate response.*)
     let rec map input = 
-        AQueue.pop q >>= fun c -> let (s,r,w) = c in 
-        WRequest.send w (WRequest.MapRequest input);
-        WResponse.receive r >>= fun res ->  
+      AQueue.pop q >>= fun c -> let (s,r,w) = c in 
+      WRequest.send w (WRequest.MapRequest input);
+      WResponse.receive r >>= fun res ->  
       begin match res with
-      | `Eof -> workersLeft := !workersLeft - 1; 
-        if !workersLeft == 0 then raise InfrastructureFailure
-        else map input (*when worker fails*) 
+      | `Eof -> next_worker map input c
       | `Ok (WResponse.JobFailed x) -> raise (MapFailure x) 
       | `Ok (WResponse.MapResult lst) -> AQueue.push q c; return lst 
-      | `Ok (WResponse.ReduceResult o) -> failwith "Impossible to return a 
-                                                    ReduceResult"
+      | `Ok (WResponse.ReduceResult o) -> next_worker map input c
     end in  
 
-    let rec reduce (k ,vl) =
+    (*Performs reduce part of map_reduce. Issues one reduce job to a worker and 
+      waits for the result. Also handles the cases where the connection to the 
+      worker is dead or the worker returns an inappropriate response.*)
+    let rec reduce (k, vl) =
         AQueue.pop q >>= fun c -> let (s,r,w) = c in 
         WRequest.send w (WRequest.ReduceRequest (k, vl));
         WResponse.receive r >>= fun res -> 
       begin match res with
-      | `Eof -> workersLeft := !workersLeft - 1;
-        if !workersLeft == 0 then raise InfrastructureFailure
-        else reduce (k, vl) (*when worker fails*)
+      | `Eof -> next_worker reduce (k, vl) c
       | `Ok (WResponse.JobFailed x) -> raise (ReduceFailure x)
-      | `Ok (WResponse.MapResult lst) -> failwith "Impossible to return a
-                                                   MapResult"
+      | `Ok (WResponse.MapResult lst) -> next_worker reduce (k, vl) c
       | `Ok (WResponse.ReduceResult o) -> AQueue.push q c; return (k, o)
     end in
 
-    let rec terminate () = 
-      if !workersLeft = 0 then ()
-      else begin
-      ignore (AQueue.pop q >>= fun (s,r,w) -> workersLeft := !workersLeft -1; 
-        return (Socket.shutdown s `Both); 
-      ); terminate ()
-    end
-  in
+    (*Terminates map_reduce process by closing all connections.*)
+    let rec terminate countdown = 
+      if countdown <= 0 then 
+        return ()
+      else
+        AQueue.pop q >>= fun (s,r,w) -> 
+        return (Socket.shutdown s `Both) >>= fun () -> terminate (countdown-1)
+    in
 
-    let start ()= 
+    (*Helper function. Given a host and port, this functions tries to
+      establish a connection to the worker. If the connection succeeds, then
+      the worker is started. If it fails, then the number of functional workers
+      is decremented by one.*)
+    let connect_helper (s, i) =
+      let connect () =
+        Tcp.connect (Tcp.to_host_and_port s i) in
+      Monitor.try_with connect >>= function
+      | Core.Std.Ok (s,r,w) -> 
+          Writer.write_line w Job.name;
+          AQueue.push q (s, r, w); return ()
+      | Core.Std.Error _ -> workersLeft := !workersLeft - 1; return () in
+
+    (*Starts the map_reduce process by attempting to connect to each of the 
+      specified ports*)
+    let start () = 
       let lst = !initLst in 
-      List.fold_left(fun acc e -> 
-        let (s,i) = e in
-        ignore( Tcp.connect (Tcp.to_host_and_port s i) >>= fun v -> 
-          let (s,r,w) = v in 
-          Writer.write_line w Job.name; 
-          AQueue.push q v; (return ()) )) () (lst) 
-    
-    
-  in
+      List.fold_left (fun acc e -> connect_helper e) (return ()) lst in
+  
+    start () >>= fun () -> 
+    print_int (!workersLeft);
+    if !workersLeft = 0 then 
+      raise InfrastructureFailure 
+    else
+      Deferred.List.map ~how: `Parallel inputs ~f: map 
+      >>| List.flatten
+      >>| C.combine
+      >>= Deferred.List.map ~how: `Parallel ~f: reduce
+      >>= fun x -> terminate (!workersLeft) >>= fun () -> return x
 
-    start (); 
-    Deferred.List.map ~how: `Parallel inputs ~f: map 
-    >>| List.flatten
-    >>| C.combine
-    >>= Deferred.List.map ~how: `Parallel ~f: reduce
-    >>= fun x -> terminate (); 
-                 (*close everything*) return x
 end

@@ -1,17 +1,22 @@
 open Async.Std
 
 module Make (Job : MapReduce.Job) = struct
-  module Honwei2 = Protocol.WorkerRequest (Job)
-  module Honwei3 = Protocol.WorkerResponse (Job)
+  module WorkerRequest = Protocol.WorkerRequest (Job)
+  module WorkerResponse = Protocol.WorkerResponse (Job)
   (* see .mli *)
   let run r w = 
     let rec loop r' w' =
-      Honwei2.receive r' >>= function
-        | `Eof -> return ()
-        | `Ok Honwei2.MapRequest input ->
-            Job.map input >>= (fun result -> return (Honwei3.send w' (Honwei3.MapResult result))) >>= (fun _ -> loop r' w')
-        | `Ok Honwei2.ReduceRequest (key, lst) ->
-            Job.reduce (key, lst) >>= (fun result -> return (Honwei3.send w' (Honwei3.ReduceResult result))) >>= (fun _ -> loop r' w')
+      WorkerRequest.receive r' >>= function
+      | `Eof -> return ()
+      | `Ok WorkerRequest.MapRequest input -> 
+          Job.map input >>= (fun result -> 
+            return (WorkerResponse.send w' (WorkerResponse.MapResult result))) 
+              >>= (fun _ -> loop r' w')
+      | `Ok WorkerRequest.ReduceRequest (key, lst) -> 
+          Job.reduce (key, lst) >>= (fun result -> 
+            return (
+              WorkerResponse.send w' (WorkerResponse.ReduceResult result))) 
+                >>= (fun _ -> loop r' w')
   in loop r w
 
 end
