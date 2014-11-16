@@ -32,7 +32,8 @@ module Job = struct
       )
       ([], []) lst
     in
-    (** Generates list of pairs of elements from a list 1 by elements from a list 2 *)
+    (** Generates list of pairs of elements from a list 1 by elements 
+    from a list 2 *)
     let cross_prod (l1, l2) = 
       List.fold_left (fun a x ->
         List.fold_left (fun b y ->
@@ -83,7 +84,7 @@ module App = struct
           >>= MR.map_reduce
           >>| clean_and_print
       end
-      | _ -> failwith "Incorrect number of input files. Please provide two files."
+      | _ -> failwith "Incorrect number of input files."
   end
 end
 

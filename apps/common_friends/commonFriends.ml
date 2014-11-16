@@ -73,8 +73,6 @@ module App = struct
     let main args =
         read_files args
         >>= MR.map_reduce
-        (* replace this failwith with print once you've figured out the key and
-           inter types*)
         >>| print
   end
 end
