@@ -96,7 +96,6 @@ module Make (Job : MapReduce.Job) = struct
       List.fold_left (fun acc e -> connect_helper e) (return ()) lst in
   
     start () >>= fun () -> 
-    print_int (!workersLeft);
     if !workersLeft = 0 then 
       raise InfrastructureFailure 
     else
