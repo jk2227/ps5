@@ -79,11 +79,13 @@ module App  = struct
     let main args =
       match args with
       | [s] -> begin
-        read s >>= (fun name_data_pair -> Deferred.List.map name_data_pair (fun (x, y) -> return (x, AppUtils.split_words y)) )
+        read s >>= (fun name_data_pair -> 
+          Deferred.List.map name_data_pair 
+          (fun (x, y) -> return (x, AppUtils.split_words y)) )
         >>= MR.map_reduce
         >>= (fun x -> return (output x))
       end
-      | _ -> failwith "Incorrect number of input files. Please pass one master 'file of file paths' file"
+      | _ -> failwith "Incorrect # of input files."
   end
 end
 
